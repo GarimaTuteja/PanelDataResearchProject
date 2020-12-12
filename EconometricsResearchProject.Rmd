@@ -1,0 +1,334 @@
+---
+
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(ggplot2,DMwR,dplyr,foreign,reshape2,plm,tidyverse,broom.mixed,lmtest,e1071,stargazer)
+```
+
+```{r}
+guns<-read.dta("guns.dta",convert.factors = TRUE,
+                missing.type = FALSE,
+                convert.underscore = FALSE, warn.missing.labels = TRUE)
+```
+
+```{r}
+str(guns)
+```
+#The given  balanced panel data observes the guns related data across different states in USA over the years 1977-1999 .From structure of data, we see that variables vio,mur,rob,incarc_rate,avginc,pop,density,pb1064,pw1064,pm1029 are continuous and the variables year,stateid and shall should be indicator variables. 
+
+
+```{r}
+summary(guns)
+```
+
+```{r}
+mydata <- guns[, c(2,3,4,5,6,7,8,9,10,11)]
+cormat <- round(cor(mydata),2)
+melted_cormat <- melt(cormat)
+
+get_lower_tri<-function(cormat){
+    cormat[upper.tri(cormat)] <- NA
+    return(cormat)
+}
+
+get_upper_tri <- function(cormat){
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+}
+
+upper_tri <- get_upper_tri(cormat)
+
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+# Heatmap
+library(ggplot2)
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+```
+#There are significant strong correlations between violent rate , murder rate, robbery rate 
+
+
+#Check if there are any missing values in data
+```{r}
+sapply(guns, function(x) sum(is.na(x)))
+```
+
+#Average crime rate across each state in United States over the period 1977-1999
+```{r}
+shall<-data.frame(guns%>%group_by(stateid)%>%summarise(avgcrime=mean(vio),.groups='drop')%>%arrange(desc(avgcrime)))
+names(shall)<-c('stateid','avgcrime')
+head(shall)
+```
+
+#From the above analysis we see that State with Id 11 is having highest crime rate whereas State with Id 38 is having lowest crime rate. Further will see if there are any significant differences across these two states
+
+
+#Subset the two states with Id 38 and 11 and analyse if we can get any specific information 
+```{r}
+crimes<-guns[guns$stateid=='38' | guns$stateid=='11' | guns$stateid=='12',]
+```
+
+```{r}
+blacks<-data.frame(crimes%>%group_by(stateid)%>%summarise(blacks=mean(pb1064),whites=mean(pw1064),.groups='drop'))
+names(blacks)<-c('stateid','blacks','whites')
+blacks
+```
+
+```{r}
+cols <- c('red','blue');
+ylim <- c(0,max(blacks[c('blacks','whites')])*1.8);
+par(lwd=6);
+barplot(
+    t(blacks[c('blacks','whites')]),
+    beside=T,
+    ylim=ylim,
+    border=cols,
+    col='white',
+    names.arg=blacks$stateid,
+    xlab='StateId',
+    ylab='PopulationPercentage',
+    legend.text=c('AvgPercentageBlacks','AvgPercentageWhites'),
+    args.legend=list(text.col=cols,col=cols,border=cols,bty='n')
+);
+box();
+```
+#State Id 38 is having lowest crime rate and we see that Average percentage of Blacks living in State 38 is very less when compared with state which is having highest crime rate State 11. However in State Id 11, there are equal Blacks and Whites. So, we need to further analyse if blacks were the main cause for higher crime rate in State Id 11. Also we observed that crime rate in State id 11 is very high when compared with all other states.
+
+```{r}
+shall
+```
+
+#The average crime rate in State Id 11 is 2048 which is double than that of all the other states. In state id 12 the crime rate is 999 which is half that of the average crime rate in state id 11. 
+
+
+
+```{r}
+k<-crimes[crimes$stateid==11,]
+unique(k$shall)
+
+k<-crimes[crimes$stateid==12,]
+unique(k$shall)
+
+k<-crimes[crimes$stateid==38,]
+unique(k$shall)
+```
+#The shall issue laws were not passed in the State Id 11. It might be one of the reason that crime rate is very high when compared with other states and shall issue laws were passed in states 12 and 38. Also crime rate is very high in state 12 when compared to state 38, though the shall issue laws were passed in both of these two states. Percentage of blacks living in State 12 is 5.48 which is high when compared with State 38 1.48%. So, shall issue laws and percentage of blacks living in the state are some of the important features in this sample 
+
+
+#Histogram of Violent crime rate
+```{r}
+ggplot(guns,aes(x=vio)) + geom_histogram(binwidth = 40) +ggtitle("Violent Crime rate across United States")
+ggplot(guns,aes(x=log(vio))) + geom_histogram(binwidth =0.5) + ggtitle("Violent crime rate across United States")
+```
+
+#Before applying log transformation, the distribution of crime rate across United States in heavily skewed towards right and poitively skewed distribution. Most of the statistical analysis or statistical models require Normal Distribution because of its significant statistical properties such as constant mean and constant variance across the data. After applying necessary log transformation on data the distribution of crime rate became approximately symmetrical or atleast weakly skewed but not heavily skewed
+
+```{r}
+guns$vio<-log(guns$vio)
+```
+
+
+#The given guns data is a balanced panel of data on 50 United States plus the District of Columbia (for a total of 51 states) by year from 1977-1999. 
+
+#Run the OLS and check residual analysis plots
+```{r}
+ols<-lm(vio~mur+rob+incarc_rate+pb1064+pw1064+pm1029+pop+avginc+density+shall,data=guns)
+tidy(ols)
+```
+
+```{r}
+summary(ols)
+```
+#71.86 percentage of variation in violent crime rate is explained by all other explanatory variables such as murder rate, robbery rate,incarceration rate,percentage of blacks,whites and males living in state, population, average per capita income of state and density. FRom Ordinary Least squares, passing shall issue laws will reduce the violent crime rate by 27.79% approximately. This is really huge and overstating the impact of shall issue laws
+
+```{r}
+par(mfrow=c(2,2))
+plot(ols)
+```
+#From the Residual Analysis plots, we observe that the linear regression assumptions are violated.The expected value of random error is not zero from Residuals vs Fitted plots. Varaince of error terms are not constant from scale location plots implies Heyteroskedasticity. Covariance between any two pair of error terms is not zero from QQ plots implies error terms are not normally distributed.
+
+
+#In case of Pooled OLS, we ignore the panel nature of data and proceed with the analysis. Before doing pooled OLS estimations, first add interaction between pb1064*pb1064 to know if there is any diminishing effects and add interactions between pw1064 and pm1029, also add interaction between pw1064 and pb1064, pm1029 and pb1064, and pop*pop, avginc*avginc, density*density,shall*density,shall*pop
+
+#Pooles OLS Estimation: In case of Pooled OLS model we ignore the panel nature of data and estimate it using Ordinary Least squares method. However we need to specify arguments to ignore the panel nature of data i.e. the intercepts and slope coefficients do not vary across states and time
+```{r}
+pooled_ols <- plm(vio~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall + I(pb1064^2)+I(pw1064*pm1029)+I(pw1064*pb1064)+I(pm1029*pb1064)+I(pop^2)+I(avginc^2)+I(density^2)+I(shall*density)+I(shall*pop),method="pooling",data = guns,index=c("stateid","year"))
+tidy(pooled_ols)
+```
+#Interactions such as pop*pop,shall*pop are insignificant and density variable itself is insignificant. So adding an interaction such as density*density would not be of much use. Ignore the insignificant interactions and  re run the pooled ols
+
+
+```{r}
+pooled_ols <- plm(vio~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall + I(pb1064^2)+I(pw1064*pm1029)+I(pw1064*pb1064)+I(pm1029*pb1064)+I(avginc^2),method="pooling",data = guns,index=c("stateid","year"))
+tidy(pooled_ols)
+```
+
+#With Pooled OLS shall issue laws reduce the violent crime rate by 10.17%. Since there is Heteroskedasticity in data the estimators obatined using pooled ols estimations are still, linear, unbiased and consistent. But it is not the best estimator.The standard errors obtained are incorrect and confidence intervals will be wrong.In such cases we need to use Pooled OLS estimators with Cluster Robust Standard errors
+
+
+#The coefficient of Indicator variable shall issue laws is negative and the interpretation is  violent crime rate is going to reduce by 10% approximately when not having shall issue laws. Reducing the crime rate by approximately 10% by implementing shall issue laws is a good impact and shall issue laws are playing a major role in reducing the crime rate and also we can observe that the p-value is very very less and this coefficient is highly significant
+
+```{r}
+coeftest(pooled_ols, vcov=vcovHC(pooled_ols,type="HC1",cluster="group"))
+```
+# The estimators are linear unbiased and consistent but they are no longer the best and standard erros are incorrect. Expected value of error term is zero is violated, we can relax this assumption for now because we are having consistent estimators. Having large sample sizes will converge to true population parameter. We can fix standard errors or calculate correct standard errors using Cluster Robust Standard Errors. The standard errors are now large using Cluster Robust Standard errors. The standard errors obtained using pooled OLS with least squares standard errors is very very less and  overstating the pooled ols model. Here we are ignoring the individual correlation within entities state over time. With cluster robust standard errors the standard errors and confidence intervals obtained are correct
+
+#In Pooled OLS model, estimators are same for all states and across all time periods. This seems to be not a good approach because there will be states where population of people living there are nice and having low crime rate and there will be states where more people in those states tends to commit crime always. So the nature of people living in these states is an unobservable characteristic and this might be correlated with error term resulting in endogeneity. So the variables such as percent of population living in states might be correlated with error term. This unobserved heterogeneity leads to biased and inconsistent estimators. Panel Data can control this unobserved heterogeneity using Fixed effects model
+
+
+#Entity Fixed Effects: Entities are States: The omitted variable which is hiding in the error term results in biased estimators known as Omitted Variable bias. These omitted variables might vary over entities but not across time. In such a case we should use Entity fixed effects model 
+#For Violent Rate 
+```{r}
+state_fixed_effects <- plm(vio~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall + I(pb1064^2)+I(pw1064*pm1029)+I(pw1064*pb1064)+I(pm1029*pb1064)+I(pop^2)+I(avginc^2)+I(density^2)+I(shall*density)+I(shall*pop) ,method="within",data = guns,index=c("stateid"))
+tidy(state_fixed_effects)
+```
+#Ignore the insignifcant interactions
+
+```{r}
+state_fixed_effects <- plm(vio~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall + I(pb1064^2)+I(pw1064*pm1029)+I(pw1064*pb1064)+I(pm1029*pb1064)+I(avginc^2),method="within",data = guns,index=c("stateid"))
+tidy(state_fixed_effects)
+
+```
+
+
+#The estimators for explanatory variables are same across all entities and across all time periods. However the intercepts vary for each entity and if we observe now that passing shall issue laws across United States will reduce the crime rate by 10% approximately. In case of Pooled OLS we got an estimator which estimates that shall issue laws will reduce crime rate by 10% which is approximately same as that of entity fixed effects. 10% reduce in crime rate is huge and there may be chance that people will pretend as good till they get licence and start doing crime once they have guns. The nature or characteristics of people across different states is unobservable heterogeneity and this unobservable heterogeneity is varied across each state so the intercept varies across each state. The effect of entity fixed effects across each state varies and shown below
+
+```{r}
+fixef(state_fixed_effects)
+```
+
+#In case of entity fixed effects, we assumed unobservable heterogeneity is not varying over time and it is varying only across entities. However if the unobservable hetrogeneity is changing over time then the estimators are still biased only. There is a chance that nature of people change over time because if the government pass strict laws to reduce crime then crime rate will reduce automatically and the nature of people will change. This might be the reason that we did not get an unbiased estimator or we did not see any improvement with entity fixed effects and pooled ols
+
+#Time Fixed Effects:
+```{r}
+time_fixed_effects <- plm(vio~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall + I(pb1064^2)+I(pw1064*pm1029)+I(pw1064*pb1064)+I(pm1029*pb1064)+I(pop^2)+I(avginc^2)+I(density^2)+I(shall*density)+I(shall*pop),method="within",data = guns,index=c("year"))
+tidy(time_fixed_effects)
+```
+
+#With time fixed effects shall issue laws will reduce crime rate by 38% approximately. This seems to be more biased estimator than that of OLS and Pooled OLS. Ignore the insignificant Interactions
+```{r}
+time_fixed_effects <- plm(vio~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall + +I(pw1064*pm1029)+I(pm1029*pb1064)+I(pop^2)+I(avginc^2)+I(shall*pop)+factor(year),method="within",data = guns,index=c("year"))
+tidy(time_fixed_effects)
+```
+
+#After ignoring insignificant interactions, we observe with time fixed effects shall issue laws will reduce crime rate by 45%which is very huge and it is practically not imaginable as well. 
+```{r}
+fixef(time_fixed_effects)
+```
+#The estimator of shall issue laws seems to be biased because it is overstating that passing shall issue laws reduce crime rate by 45 %. This might be a problem because may be the government passed laws across some states which are more prone to crimes. In such a case as we are ignoring this nature it might be correlated with explanatory variable, and the exact interpretation of reduce in crime rate estimation , how much it is coming from error term and how much is coming from explanatory variable cannot be seperated. As a result the estimator will be biased. In such a case use fixed effects model varying across each state and also over time
+
+#Entity time fixed effects:
+```{r}
+entity_time_fixed_effects <- plm(vio~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall + I(pb1064^2)+I(pw1064*pm1029)+I(pw1064*pb1064)+I(pm1029*pb1064)+I(pop^2)+I(avginc^2)+I(density^2)+I(shall*density)+I(shall*pop)+factor(year),method="within",data = guns,index=c("stateid","year"))
+tidy(entity_time_fixed_effects)
+
+```
+#Ignoring insignificant interactions
+
+```{r}
+entity_time_fixed_effects <- plm(vio~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall + I(pb1064^2)+I(pw1064*pm1029)+I(pw1064*pb1064)+I(pm1029*pb1064)+I(avginc^2)+factor(year),method="within",data = guns,index=c("stateid","year"))
+tidy(entity_time_fixed_effects)
+```
+
+#With entity time fixed effects, passing shall issue laws will reduce crime rate by 6.7% and the estimator of shall seems to be reliable and also it is highly significant. Also the estimator is unbiased and consistent. However the standard errors are not correct. We can estimate or we can calculate correct standard errors using Robust Stnadrd errors
+
+```{r}
+stargazer::stargazer(pooled_ols,state_fixed_effects,time_fixed_effects,entity_time_fixed_effects,se=list(sqrt(diag(vcovHC(pooled_ols, method="arellano", type="HC1"))),sqrt(diag(vcovHC(state_fixed_effects, method="arellano", type="HC1"))),sqrt(diag(vcovHC(time_fixed_effects, method="arellano", type="HC1"))),sqrt(diag(vcovHC(entity_time_fixed_effects, method="arellano", type="HC1")))),title="Panel results with td, adding fixed effects",type="text",column.labels=c("panel with robust SE","entity fixed effects","time fixed effects","entity and time fixed effects"),omit = c("factor[(]cohort[)]","factor[(]major_id[)]","factor[(]semester[)]"),omit.yes.no = c("Yes","No"))
+```
+
+#We cannot use Random Effects for this model because these entities are not coming from Random Population. All these entities are states in the country United states and they are not random in nature. Based on the above analysis we observe that violent crime will reduce and shall issue laws are playing some significant impact. 6% redution in crime rate by passing shall issue laws is acceptable and it seems to be realistic rather than overstating
+
+#As of now we analysed only if shall issue laws were affecting the crime rate. However the robbery and murder rates are also considered as crimes and we further analyse that if the shall issue laws are playing any significant role in affecting these two
+
+#Robbery Rate:
+```{r}
+ggplot(guns,aes(x=rob)) + geom_histogram() + ggtitle("Average Robbery Rate across United States per 100,000 incidents")
+ggplot(guns,aes(x=mur)) + geom_histogram() + ggtitle("Average Murder Rate across United States per 100,000 incidents")
+```
+#The distribution of murder rate and robbery rate is also highly skewed. 
+
+```{r}
+guns$rob<-log(guns$rob)
+guns$mur<-log(guns$mur)
+ggplot(guns,aes(x=rob)) + geom_histogram() + ggtitle("Average Robbery Rate across United States per 100,000 incidents")
+ggplot(guns,aes(x=mur)) + geom_histogram() + ggtitle("Average Murder Rate across United States per 100,000 incidents")
+```
+
+```{r}
+skewness(guns$rob)
+skewness(guns$mur)
+```
+
+```{r}
+entity_time_fixed_effects_rob <- plm(rob~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall +factor(year),method="within",data = guns,index=c("stateid","year"))
+tidy(entity_time_fixed_effects_rob)
+```
+
+#Generally , we observe that the robbery rate also will reduce if we pass any strict laws.And the estimator is as expected, passing shall issue laws will reduce robbery rate by 5.4% and the estimator is significant at 1% 
+
+
+#Further lets see, if shall issue laws are impacting murder rate as well
+
+```{r}
+entity_time_fixed_effects_mur <- plm(mur~incarc_rate + pb1064 + pw1064 + pm1029 + pop + avginc + density + shall +factor(year),method="within",data = guns,index=c("stateid","year"))
+tidy(entity_time_fixed_effects_mur)
+```
+
+#From the above analysis, we see that passing shall issue laws will reduce the murder rate by 2.5% and it is highly insignificant. By passing shall issue laws we expect more number of crimes should be reduced but however the murder rate is not as expected. This might be because more people tends to do crime after getting hand guns licence
+
+
+#So, Based on these analysis, shall issue laws will reduce the crime rate in United States by approximately 5% and this estimator is Linear Unbiased and consistent as per entity time fixed effects model
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
